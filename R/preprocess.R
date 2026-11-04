@@ -3,10 +3,27 @@
 #
 # Pipeline:
 #   1. Load the vintage and apply the tcode transformations   (fbi::fredmd)
+#      -> save fredmd_tcode_<vintage>.csv
 #   2. Remove outliers, setting them to NA                     (fbi::rm_outliers.fredmd)
 #   3. Summarise missing values by decade (table + heatmap)
 #   4. Impute missing values with the tall-wide method         (fbi::tw_apc)
 #   5. Save transformed (with NAs) and imputed (clean) CSVs
+#
+# Outputs in data/clean/ (all start 2 months after the raw file, the rows lost
+# to differencing, and share the same date + series-name headers):
+#
+#   fredmd_tcode_<vintage>.csv        tcode transform ONLY. No outlier removal,
+#                                     NAs kept (incl. the ragged final month).
+#                                     -> use this for forecasting; apply any
+#                                        outlier rule / imputation inside each
+#                                        estimation window.
+#   fredmd_transformed_<vintage>.csv  tcode + FULL-SAMPLE 10 x IQR outlier
+#                                     removal (outliers -> NA). NAs kept.
+#                                     Legacy; uses future data to set outliers.
+#   fredmd_clean_<vintage>.csv        as transformed, plus FULL-SAMPLE tw_apc
+#                                     imputation (no NAs). Leaks future info:
+#                                     exploration / plots only, NOT for
+#                                     out-of-sample forecasting.
 #
 # Run from the repo root (open the .Rproj), or rely on here() below.
 # =============================================================================
@@ -26,6 +43,17 @@ dir.create(here("figures"),       showWarnings = FALSE)
 
 # ---- 1. Load and transform --------------------------------------------------
 md <- fredmd(RAW_FILE, date_start = NULL, date_end = DATE_END, transform = TRUE)
+
+# tcode transform only: no outlier removal, NAs kept, first 2 rows dropped
+md_tcode <- as.data.frame(md)[-(1:2), ]
+write.csv(md_tcode,
+          here("data", "clean", paste0("fredmd_tcode_", VINTAGE, ".csv")),
+          row.names = FALSE)
+
+# Ragged edge: series not yet published in the final month
+last_na <- names(md_tcode)[-1][is.na(unlist(md_tcode[nrow(md_tcode), -1]))]
+cat("Final month", format(as.Date(md_tcode$date[nrow(md_tcode)])), "has",
+    length(last_na), "series missing:", paste(last_na, collapse = ", "), "\n")
 
 # ---- 2. Outliers ------------------------------------------------------------
 # McCracken & Ng rule: |x - median| > 10 * IQR  ->  set to NA
@@ -81,6 +109,7 @@ dev.off()
 # tw_apc returns $data on the ORIGINAL scale with only the gaps filled.
 imp      <- tw_apc(X, kmax = KMAX, center = TRUE, standardize = TRUE, re_estimate = TRUE)
 X_filled <- imp$data
+colnames(X_filled) <- colnames(X)   # tw_apc drops the series names
 
 # Sanity checks
 stopifnot(!anyNA(X_filled))
@@ -97,5 +126,11 @@ write.csv(data.frame(date = dates, X, check.names = FALSE),
 write.csv(data.frame(date = dates, X_filled, check.names = FALSE),
           here("data", "clean", paste0("fredmd_clean_", VINTAGE, ".csv")),
           row.names = FALSE)
+
+# All three outputs must have identical headers (date + series names)
+hdr <- function(kind) names(read.csv(here("data", "clean", paste0("fredmd_", kind, "_", VINTAGE, ".csv")),
+                                     nrows = 1, check.names = FALSE))
+stopifnot(identical(hdr("clean"), hdr("transformed")),
+          identical(hdr("tcode"), hdr("transformed")))
 
 cat("Done.\n")
