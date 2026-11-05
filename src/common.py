@@ -37,6 +37,7 @@ TCODE_PATH = REPO_ROOT / "data" / "clean" / f"fredmd_tcode_{VINTAGE}.csv"
 # The other periods will be added here once agreed.
 PERIODS = {
     "2005-2015": ("2005-01-01", "2015-12-31"),
+    "1990-2004": ("1990-01-01", "2004-12-31"),
 }
 
 
